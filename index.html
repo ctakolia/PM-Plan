@@ -68,7 +68,7 @@ m.value = now.getMonth();
 // Fetch and load Job.xlsx from Data/job.xlsx
 async function loadExcelData() {
   try {
-    const response = await fetch('Data/job.xlsx');
+    const response = await fetch('job.xlsx');
     const arrayBuffer = await response.arrayBuffer();
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const firstSheetName = workbook.SheetNames[0];
