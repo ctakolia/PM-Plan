@@ -1,0 +1,233 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plant Monthly PM Planner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#eef2f7;color:#172033}.top{background:linear-gradient(135deg,#0b2f5b,#075985);color:#fff;padding:18px 24px}.top h1{margin:0 0 5px;font-size:24px}.top p{margin:0;color:#dbeafe}.wrap{padding:16px}.bar,.cards,.panel{background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 2px 8px #0001}.bar{padding:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:end}.field label{display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:4px}.field select,.field input{height:34px;border:1px solid #94a3b8;border-radius:6px;padding:5px 8px;background:#fff}.search{min-width:240px}.btn{height:34px;border:0;border-radius:6px;padding:0 13px;color:#fff;font-weight:700;cursor:pointer}.blue{background:#1d4ed8}.green{background:#15803d}.orange{background:#c2410c}.gray{background:#475569}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;margin:12px 0;overflow:hidden}.card{padding:12px;background:#fff;text-align:center}.card b{display:block;font-size:22px;color:#075985}.tabs{display:flex;gap:6px;margin:12px 0}.tab{padding:9px 14px;border:0;border-radius:7px;background:#cbd5e1;font-weight:700;cursor:pointer}.tab.active{background:#075985;color:#fff}.panel{overflow:hidden}.panelhead{padding:10px 12px;background:#e2e8f0;display:flex;justify-content:space-between;align-items:center}.tablewrap{overflow:auto;max-height:62vh}table{border-collapse:collapse;width:100%;font-size:11px;line-height:1.1}th{position:sticky;top:0;background:#0b2f5b;color:#fff;padding:4px 6px;border:1px solid #334155;white-space:nowrap;line-height:1.1}td{padding:2px 5px;border:1px solid #cbd5e1;vertical-align:middle;line-height:1.1;height:20px}tr:nth-child(even){background:#f8fafc}.muted{color:#64748b}.foot{padding:10px;font-size:11px;color:#475569}@media(max-width:800px){.cards{grid-template-columns:repeat(2,1fr)}.bar{align-items:stretch}.field,.field input,.field select{width:100%}}@media print{.bar,.tabs,.btn,.cards{display:none!important}.wrap{padding:0}.panel{box-shadow:none;border:0}.tablewrap{max-height:none;overflow:visible}th{position:static}}.heading-row td{background:#dbeafe;font-weight:700;border-top:2px solid #2563eb}.sub-row td:nth-child(4){padding-left:22px}.sub-row td:nth-child(4)::before{content:"↳ ";color:#64748b}.group-start td{border-top:2px solid #94a3b8}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Plant Monthly PM Planner</h1>
+  <p>Reference cycle: 01 January 2026 | Monthly and day-based recurring preventive maintenance planning</p>
+</div>
+<div class="wrap">
+  <div class="bar">
+    <div class="field"><label>Planning Year</label><select id="year"></select></div>
+    <div class="field"><label>Month</label><select id="month"></select></div>
+    <div class="field"><label>Area</label><select id="area"><option value="All">All</option></select></div>
+    <div class="field"><label>Search</label><input id="search" class="search" placeholder="Plan no. or job..."/></div>
+    <button class="btn blue" onclick="render()">Apply</button>
+    <button class="btn green" onclick="exportExcel()">Export Excel</button>
+    <button class="btn orange" onclick="exportPDF()">Monthly PDF</button>
+    <button class="btn gray" onclick="window.print()">Print</button>
+  </div>
+  <div class="cards">
+    <div class="card"><b id="cTotal">0</b>Total Jobs</div>
+    <div class="card"><b id="cArea">0</b>Areas</div>
+  </div>
+  <div class="tabs">
+    <button id="dueTab" class="tab active" onclick="setTab('due')">Monthly Due Jobs</button>
+    <button id="backlogTab" class="tab" onclick="setTab('backlog')">Unscheduled / Pending Jobs</button>
+  </div>
+  <div class="panel">
+    <div class="panelhead"><b id="panelTitle">Monthly Due Jobs</b><span id="summary" class="muted"></span></div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Sr.</th><th>Plan No.</th><th>Area</th><th>PM Job</th><th>Frequency</th><th>Due Date</th><th>Done By</th></tr>
+        </thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+    <div class="foot">Display-only monitoring view. Blank-frequency jobs remain under Unscheduled / Pending Jobs.</div>
+  </div>
+</div>
+
+<script>
+let DATA = [];
+const REF = new Date(2026, 0, 1);
+let tab = 'due';
+const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+const y = document.getElementById('year');
+const m = document.getElementById('month');
+const areaSelect = document.getElementById('area');
+
+for(let n = 2026; n <= 2035; n++) y.add(new Option(n, n));
+months.forEach((x, i) => m.add(new Option(x, i)));
+const now = new Date();
+y.value = Math.max(2026, now.getFullYear());
+m.value = now.getMonth();
+
+// Fetch and load Job.xlsx from Data/job.xlsx
+async function loadExcelData() {
+  try {
+    const response = await fetch('Data/job.xlsx');
+    const arrayBuffer = await response.arrayBuffer();
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    const firstSheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[firstSheetName];
+    const rawData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+    let currentHeadingPlan = "";
+    let currentHeadingFreq = null;
+    let currentHeadingUnit = null;
+
+    DATA = rawData.map((row, index) => {
+      const itemType = String(row['Item Type'] || '').trim().toLowerCase();
+      const isHeading = itemType === 'heading';
+      
+      let plan = String(row['Plan No.'] || '').trim();
+      let freq = row['Frequency'] !== "" && !isNaN(row['Frequency']) ? Number(row['Frequency']) : null;
+      let unit = row['Unit'] ? String(row['Unit']).trim().toLowerCase() : null;
+
+      if (isHeading) {
+        currentHeadingPlan = plan;
+        currentHeadingFreq = freq;
+        currentHeadingUnit = unit;
+      } else {
+        // Sub-job inherits heading's Plan No, Frequency, and Unit if empty
+        if (!plan || plan === 'Pending') plan = currentHeadingPlan || 'Pending';
+        if (freq === null) freq = currentHeadingFreq;
+        if (unit === null) unit = currentHeadingUnit;
+      }
+
+      return {
+        id: index + 1,
+        plan: plan,
+        area: String(row['Area'] || '').trim(),
+        job: String(row['PM Job'] || '').trim(),
+        frequency: freq,
+        unit: unit,
+        doneBy: String(row['Done By'] || '').trim(),
+        isHeading: isHeading,
+        isSubItem: !isHeading
+      };
+    });
+
+    populateAreas();
+    render();
+  } catch (err) {
+    console.error("Error loading Excel file:", err);
+    document.getElementById('body').innerHTML = `<tr><td colspan="7" style="text-align:center;color:red;padding:20px;">Failed to load Data/job.xlsx. Please ensure the file exists in your repository under the 'Data' folder.</td></tr>`;
+  }
+}
+
+function populateAreas() {
+  const areas = [...new Set(DATA.map(x => x.area))].filter(Boolean).sort();
+  areaSelect.innerHTML = '<option value="All">All</option>';
+  areas.forEach(a => areaSelect.add(new Option(a, a)));
+}
+
+function dueDates(item, yr, mo) {
+  if (!item.frequency || !item.unit) return [];
+  let out = [];
+  if (item.unit === 'month' || item.unit === 'months') {
+    let diff = (yr - 2026) * 12 + mo;
+    if (diff >= 0 && diff % item.frequency === 0) out = [new Date(yr, mo, 1)];
+  } else {
+    let start = new Date(REF);
+    for (let d = new Date(start); d <= new Date(yr, mo + 1, 0); d = new Date(d.getTime() + item.frequency * 86400000)) {
+      if (d.getFullYear() === yr && d.getMonth() === mo) out.push(d);
+    }
+  }
+  return out;
+}
+
+function fmt(d) { return d.toLocaleDateString('en-GB'); }
+function setTab(t) {
+  tab = t;
+  document.getElementById('dueTab').classList.toggle('active', t === 'due');
+  document.getElementById('backlogTab').classList.toggle('active', t === 'backlog');
+  render();
+}
+
+function rows() {
+  const yr = +y.value, mo = +m.value, a = areaSelect.value, q = document.getElementById('search').value.toLowerCase();
+  let r = [];
+  DATA.forEach(item => {
+    if (a !== 'All' && item.area !== a) return;
+    if (q && !((item.plan + ' ' + item.job + ' ' + item.doneBy).toLowerCase().includes(q))) return;
+    if (tab === 'backlog') {
+      if (!item.frequency) r.push({ ...item, due: null });
+    } else {
+      dueDates(item, yr, mo).forEach(d => r.push({ ...item, due: d }));
+    }
+  });
+  return r;
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function render() {
+  const r = rows(), yr = +y.value, mo = +m.value;
+  panelTitle.textContent = tab === 'due' ? months[mo] + ' ' + yr + ' PM Plan' : 'Unscheduled / Pending Jobs';
+  summary.textContent = r.length + ' job(s)';
+  body.innerHTML = r.map((x, i) => `
+    <tr class="${x.isHeading ? 'heading-row' : 'sub-row'}">
+      <td>${i + 1}</td>
+      <td>${esc(x.plan)}</td>
+      <td>${esc(x.area)}</td>
+      <td>${esc(x.job)}</td>
+      <td>${x.frequency ? x.frequency + ' ' + (x.unit && x.unit.startsWith('month') ? 'Month(s)' : 'Day(s)') : 'Not assigned'}</td>
+      <td>${x.due ? fmt(x.due) : '-'}</td>
+      <td>${esc(x.doneBy)}</td>
+    </tr>`).join('');
+  cTotal.textContent = r.length;
+  cArea.textContent = new Set(r.map(x => x.area)).size;
+}
+
+function exportExcel() {
+  const r = rows().map((x, i) => ({
+    'Sr. No.': i + 1,
+    'Plan No.': x.plan,
+    'Area': x.area,
+    'PM Job': x.job,
+    'Frequency': x.frequency ? x.frequency + ' ' + (x.unit && x.unit.startsWith('month') ? 'Month(s)' : 'Day(s)') : 'Not assigned',
+    'Due Date': x.due ? fmt(x.due) : '',
+    'Done By': x.doneBy
+  }));
+  if (!r.length) return alert('No jobs available for export.');
+  const ws = XLSX.utils.json_to_sheet(r), wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'PM Plan');
+  XLSX.writeFile(wb, `PM_Plan_${months[+m.value]}_${y.value}.xlsx`);
+}
+
+function exportPDF() {
+  const r = rows();
+  if (!r.length) return alert('No jobs available for PDF.');
+  if (!window.jspdf) return alert('PDF library unavailable.');
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ orientation: 'landscape' });
+  doc.setFillColor(11, 47, 91);
+  doc.rect(0, 0, 297, 22, 'F');
+  doc.setTextColor(255);
+  doc.setFontSize(16);
+  doc.text(tab === 'due' ? `Monthly PM Plan - ${months[+m.value]} ${y.value}` : 'Unscheduled PM Jobs', 10, 10);
+  doc.setFontSize(9);
+  doc.text(`Area: ${areaSelect.value} | Jobs: ${r.length} | Generated: ${new Date().toLocaleDateString('en-GB')}`, 10, 17);
+  doc.autoTable({
+    startY: 27,
+    head: [['Sr.', 'Plan No.', 'Area', 'PM Job', 'Frequency', 'Due Date', 'Done By']],
+    body: r.map((x, i) => [i + 1, x.plan, x.area, x.job, x.frequency ? x.frequency + ' ' + (x.unit && x.unit.startsWith('month') ? 'Month(s)' : 'Day(s)') : 'Not assigned', x.due ? fmt(x.due) : '-', x.doneBy]),
+    styles: { fontSize: 7, cellPadding: 1.2, overflow: 'linebreak' },
+    headStyles: { fillColor: [11, 47, 91] },
+    columnStyles: { 3: { cellWidth: 110 } },
+    margin: { left: 8, right: 8 }
+  });
+  doc.save(`PM_Plan_${months[+m.value]}_${y.value}.xlsx` ? `PM_Plan_${months[+m.value]}_${y.value}.pdf` : 'PM_Plan.pdf');
+}
+
+[y, m, areaSelect].forEach(e => e.addEventListener('change', render));
+document.getElementById('search').addEventListener('input', render);
+
+// Load data on page startup
+window.addEventListener('DOMContentLoaded', loadExcelData);
+</script>
+</body>
+</html>
